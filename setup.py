@@ -64,6 +64,7 @@ setup(
     install_requires=[
         'django',
         'dhcpkit >= 0.8.2', 'netaddr',
+        'pyyaml',
     ],
 
     test_suite='tests',
