@@ -35,6 +35,8 @@ setup(
         'Development Status :: 4 - Beta',
         'Environment :: Console',
         'Environment :: No Input/Output (Daemon)',
+        'Environment :: Web Environment',
+        'Framework :: Django',
         'Intended Audience :: Developers',
         'Intended Audience :: Information Technology',
         'Intended Audience :: System Administrators',
@@ -55,12 +57,13 @@ setup(
     include_package_data=True,
     entry_points={
         'dhcpkit.ipv6.option_handlers': [
-            'looking-glass = dhcpkit_looking_glass.option_handler:LookingGlassOptionHandler',
+            'looking-glass = dhcpkit_looking_glass.dhcpkit.option_handler:LookingGlassOptionHandler',
         ],
     },
 
     install_requires=[
-        'dhcpkit >= 0.8.0',
+        'django',
+        'dhcpkit >= 0.8.2',
     ],
 
     test_suite='tests',
