@@ -9,7 +9,6 @@ from dhcpkit.ipv6.duids import DUID
 from django.conf import settings
 from django.db import models
 from django.utils.html import format_html
-from django.utils.safestring import mark_safe
 from netaddr.eui import EUI
 from netaddr.strategy.eui48 import mac_unix_expanded
 

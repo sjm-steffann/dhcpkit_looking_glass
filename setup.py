@@ -63,7 +63,7 @@ setup(
 
     install_requires=[
         'django',
-        'dhcpkit >= 0.8.2',
+        'dhcpkit >= 0.8.2', 'netaddr',
     ],
 
     test_suite='tests',

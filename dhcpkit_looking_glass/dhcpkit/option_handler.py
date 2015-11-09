@@ -4,9 +4,7 @@ This option handler provides a looking glass into DHCP server operations
 import configparser
 import logging
 from queue import Full
-from time import sleep
 
-from dhcpkit.ipv6.exceptions import CannotRespondError
 from dhcpkit.ipv6.option_handlers import OptionHandler
 from dhcpkit.ipv6.transaction_bundle import TransactionBundle
 
