@@ -53,6 +53,18 @@ class DatabaseProcess(ctx.Process):
                     "  UNIQUE(duid, interface_id, remote_id)"
                     ")")
 
+        # Do migrations if necessary
+        cur.execute("PRAGMA USER_VERSION")
+        last_version = cur.fetchone()[0]
+
+        if last_version < 1:
+            # Update to version 1
+            cur.execute("ALTER TABLE clients ADD COLUMN last_request_type VARCHAR(50)")
+            cur.execute("ALTER TABLE clients ADD COLUMN last_response_type VARCHAR(50)")
+            last_version = 1
+
+        cur.execute("PRAGMA USER_VERSION = {}".format(last_version))
+
         db.commit()
 
         while True:
@@ -94,17 +106,27 @@ class DatabaseProcess(ctx.Process):
 
         try:
             if stage == 'pre':
+                message_type = bundle.request.__class__.__name__
+                if message_type.endswith('Message'):
+                    message_type = message_type[:-7]
+
                 cur.execute("UPDATE clients "
-                            "SET last_request=?, last_request_ll=?, last_request_ts=CURRENT_TIMESTAMP "
+                            "SET last_request_type=?, last_request=?, last_request_ll=?, "
+                            "    last_request_ts=CURRENT_TIMESTAMP "
                             "WHERE duid=? AND interface_id=? AND remote_id=?",
-                            (json.dumps(bundle.request, cls=JSONProtocolElementEncoder), identifiers['link_local'],
+                            (message_type, json.dumps(bundle.request, cls=JSONProtocolElementEncoder),
+                             identifiers['link_local'],
                              identifiers['duid'], identifiers['interface_id'], identifiers['remote_id']))
 
             elif stage == 'post':
+                message_type = bundle.response.__class__.__name__
+                if message_type.endswith('Message'):
+                    message_type = message_type[:-7]
+
                 cur.execute("UPDATE clients "
-                            "SET last_response=?, last_response_ts=CURRENT_TIMESTAMP "
+                            "SET last_response_type=?, last_response=?, last_response_ts=CURRENT_TIMESTAMP "
                             "WHERE duid=? AND interface_id=? AND remote_id=?",
-                            (json.dumps(bundle.response, cls=JSONProtocolElementEncoder),
+                            (message_type, json.dumps(bundle.response, cls=JSONProtocolElementEncoder),
                              identifiers['duid'], identifiers['interface_id'], identifiers['remote_id']))
 
         except sqlite3.DatabaseError:

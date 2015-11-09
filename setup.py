@@ -65,6 +65,7 @@ setup(
         'django',
         'dhcpkit >= 0.8.2', 'netaddr',
         'pyyaml',
+        'pytz',
     ],
 
     test_suite='tests',

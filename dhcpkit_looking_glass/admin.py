@@ -55,7 +55,7 @@ class ClientAdmin(admin.ModelAdmin):
     Admin interface for client access
     """
     date_hierarchy = 'last_request_ts'
-    list_filter = (ResponseFilter, 'last_request_ts', 'last_response_ts')
+    list_filter = (ResponseFilter, 'last_request_type', 'last_response_type', 'last_request_ts', 'last_response_ts')
     list_display = ('admin_duid', 'interface_id', 'remote_id',
                     'last_request_ll', 'last_request_type', 'last_request_ts',
                     'last_response_type', 'last_response_ts')

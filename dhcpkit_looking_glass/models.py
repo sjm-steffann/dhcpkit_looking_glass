@@ -26,52 +26,18 @@ class Client(models.Model):
     interface_id = models.CharField(max_length=1024, blank=True)
     remote_id = models.CharField(max_length=1024, blank=True)
 
+    last_request_type = models.CharField(max_length=50, blank=True, null=True)
     last_request = models.TextField(blank=True, null=True)
     last_request_ll = models.GenericIPAddressField("Link-local address", protocol='ipv6', blank=True, null=True)
     last_request_ts = models.DateTimeField("Last request timestamp", blank=True, null=True)
 
+    last_response_type = models.CharField(max_length=50, blank=True, null=True)
     last_response = models.TextField(blank=True, null=True)
     last_response_ts = models.DateTimeField("Last response timestamp", blank=True, null=True)
 
     class Meta:
         db_table = 'clients'
         unique_together = (('duid', 'interface_id', 'remote_id'),)
-
-    def last_request_type(self):
-        """
-        Parse the request and extract the message type
-
-        :return: The message type
-        """
-        try:
-            data = json.loads(self.last_request)
-            if isinstance(data, dict) and len(data) == 1:
-                message_type = list(data.keys())[0]
-                if message_type.endswith('Message'):
-                    message_type = message_type[:-7]
-                return message_type
-        except (TypeError, ValueError):
-            pass
-
-        return '?'
-
-    def last_response_type(self):
-        """
-        Parse the response and extract the message type
-
-        :return: The message type
-        """
-        try:
-            data = json.loads(self.last_response)
-            if isinstance(data, dict) and len(data) == 1:
-                message_type = list(data.keys())[0]
-                if message_type.endswith('Message'):
-                    message_type = message_type[:-7]
-                return message_type
-        except (TypeError, ValueError):
-            pass
-
-        return '?'
 
     def duid_ll(self):
         """
