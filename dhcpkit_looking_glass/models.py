@@ -9,10 +9,9 @@ from dhcpkit.ipv6.duids import DUID
 from django.conf import settings
 from django.db import models
 from django.utils.html import format_html
+from django.utils.translation import ugettext_lazy as _
 from netaddr.eui import EUI
 from netaddr.strategy.eui48 import mac_unix_expanded
-
-""
 
 # Insert our own router in here
 settings.DATABASE_ROUTERS.append('dhcpkit_looking_glass.db_routers.LookingGlassRouter')
@@ -22,22 +21,32 @@ class Client(models.Model):
     """
     Representation of the clients table that the dhcpkit option handler creates
     """
-    duid = models.CharField("DUID", max_length=1024)
-    interface_id = models.CharField(max_length=1024, blank=True)
-    remote_id = models.CharField(max_length=1024, blank=True)
+    duid = models.CharField(_('DUID'), max_length=1024)
+    interface_id = models.CharField(_('Interface-ID'), max_length=1024, blank=True)
+    remote_id = models.CharField(_('Remote-ID'), max_length=1024, blank=True)
 
-    last_request_type = models.CharField(max_length=50, blank=True, null=True)
-    last_request = models.TextField(blank=True, null=True)
-    last_request_ll = models.GenericIPAddressField("Link-local address", protocol='ipv6', blank=True, null=True)
-    last_request_ts = models.DateTimeField("Last request timestamp", blank=True, null=True)
+    last_request_type = models.CharField(_('last request type'), max_length=50, blank=True, null=True)
+    last_request = models.TextField(_('last request'), blank=True, null=True)
+    last_request_ll = models.GenericIPAddressField(_('Link-local address'), protocol='ipv6', blank=True, null=True)
+    last_request_ts = models.DateTimeField(_('last request timestamp'), blank=True, null=True)
 
-    last_response_type = models.CharField(max_length=50, blank=True, null=True)
-    last_response = models.TextField(blank=True, null=True)
-    last_response_ts = models.DateTimeField("Last response timestamp", blank=True, null=True)
+    last_response_type = models.CharField(_('last response type'), max_length=50, blank=True, null=True)
+    last_response = models.TextField(_('last response'), blank=True, null=True)
+    last_response_ts = models.DateTimeField(_('last response timestamp'), blank=True, null=True)
 
     class Meta:
         db_table = 'clients'
         unique_together = (('duid', 'interface_id', 'remote_id'),)
+
+    def __str__(self):
+        if self.remote_id and self.interface_id:
+            return '{} - {} - {}'.format(self.remote_id, self.interface_id, self.duid)
+        elif self.remote_id:
+            return '{} - {}'.format(self.remote_id, self.duid)
+        elif self.interface_id:
+            return '{} - {}'.format(self.interface_id, self.duid)
+        else:
+            return self.duid
 
     def duid_ll(self):
         """
@@ -61,7 +70,7 @@ class Client(models.Model):
 
         return None
 
-    duid_ll.short_description = 'MAC from DUID'
+    duid_ll.short_description = _('MAC from DUID')
     duid_ll = property(duid_ll)
 
     def duid_ll_org(self):
@@ -78,7 +87,7 @@ class Client(models.Model):
 
         return None
 
-    duid_ll_org.short_description = 'MAC vendor'
+    duid_ll_org.short_description = _('MAC vendor')
     duid_ll_org = property(duid_ll_org)
 
     def last_request_ll_mac(self):
@@ -106,7 +115,7 @@ class Client(models.Model):
 
         return None
 
-    last_request_ll_mac.short_description = 'Embedded MAC'
+    last_request_ll_mac.short_description = _('Embedded MAC')
     last_request_ll_mac = property(last_request_ll_mac)
 
     def last_request_ll_mac_org(self):
@@ -138,7 +147,7 @@ class Client(models.Model):
         request_yaml = yaml.dump(json.loads(self.last_request), default_flow_style=False)
         return format_html('<pre style="float: left; margin: 0">{}</pre>', request_yaml)
 
-    last_request_html.short_description = 'Last request'
+    last_request_html.short_description = _('last request')
     last_request_html.allow_tags = True
     last_request_html = property(last_request_html)
 
@@ -154,6 +163,6 @@ class Client(models.Model):
         response_yaml = yaml.dump(json.loads(self.last_response), default_flow_style=False)
         return format_html('<pre style="float: left; margin: 0">{}</pre>', response_yaml)
 
-    last_response_html.short_description = 'Last response'
+    last_response_html.short_description = _('last response')
     last_response_html.allow_tags = True
     last_response_html = property(last_response_html)
