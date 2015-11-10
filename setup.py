@@ -62,8 +62,9 @@ setup(
     },
 
     install_requires=[
-        'django',
-        'dhcpkit >= 0.8.2', 'netaddr',
+        'django >= 1.8',
+        'dhcpkit >= 0.8.2',
+        'netaddr',
         'pyyaml',
         'pytz',
     ],
