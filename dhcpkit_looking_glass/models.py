@@ -2,41 +2,46 @@
 Represent the database that the option handler creates
 """
 import json
+from collections import OrderedDict
 from ipaddress import IPv6Address
 
 import yaml
 from dhcpkit.ipv6.duids import DUID
-from django.conf import settings
 from django.db import models
 from django.utils.html import format_html
 from django.utils.translation import ugettext_lazy as _
 from netaddr.eui import EUI
 from netaddr.strategy.eui48 import mac_unix_expanded
 
-# Insert our own router in here
-settings.DATABASE_ROUTERS.append('dhcpkit_looking_glass.db_routers.LookingGlassRouter')
+
+class Server(models.Model):
+    """
+    Keep track of which servers are writing to this database
+    """
+    name = models.CharField(max_length=255, unique=True)
+
+    class Meta:
+        verbose_name = _('server')
+        verbose_name_plural = _('servers')
+        ordering = ('name',)
+
+    def __str__(self):
+        return self.name
 
 
 class Client(models.Model):
     """
     Representation of the clients table that the dhcpkit option handler creates
     """
-    duid = models.CharField(_('DUID'), max_length=1024)
-    interface_id = models.CharField(_('Interface-ID'), max_length=1024, blank=True)
-    remote_id = models.CharField(_('Remote-ID'), max_length=1024, blank=True)
-
-    last_request_type = models.CharField(_('last request type'), max_length=50, blank=True, null=True)
-    last_request = models.TextField(_('last request'), blank=True, null=True)
-    last_request_ll = models.GenericIPAddressField(_('Link-local address'), protocol='ipv6', blank=True, null=True)
-    last_request_ts = models.DateTimeField(_('last request timestamp'), blank=True, null=True)
-
-    last_response_type = models.CharField(_('last response type'), max_length=50, blank=True, null=True)
-    last_response = models.TextField(_('last response'), blank=True, null=True)
-    last_response_ts = models.DateTimeField(_('last response timestamp'), blank=True, null=True)
+    duid = models.CharField(_('DUID'), max_length=258)  # max. 128 octets = 256 hex chars, + '0x'
+    interface_id = models.CharField(_('Interface-ID'), max_length=256, blank=True)
+    remote_id = models.CharField(_('Remote-ID'), max_length=512, blank=True)
 
     class Meta:
-        db_table = 'clients'
+        verbose_name = _('client')
+        verbose_name_plural = _('clients')
         unique_together = (('duid', 'interface_id', 'remote_id'),)
+        ordering = ('remote_id', 'interface_id', 'duid')
 
     def __str__(self):
         if self.remote_id and self.interface_id:
@@ -89,6 +94,26 @@ class Client(models.Model):
 
     duid_ll_org.short_description = _('MAC vendor')
     duid_ll_org = property(duid_ll_org)
+
+
+class Transaction(models.Model):
+    server = models.ForeignKey(Server)
+    client = models.ForeignKey(Client)
+
+    last_request_type = models.CharField(_('last request type'), max_length=50, blank=True, null=True)
+    last_request = models.TextField(_('last request'), blank=True, null=True)
+    last_request_ll = models.GenericIPAddressField(_('Link-local address'), protocol='ipv6', blank=True, null=True)
+    last_request_ts = models.DateTimeField(_('last request timestamp'), blank=True, null=True)
+
+    last_response_type = models.CharField(_('last response type'), max_length=50, blank=True, null=True)
+    last_response = models.TextField(_('last response'), blank=True, null=True)
+    last_response_ts = models.DateTimeField(_('last response timestamp'), blank=True, null=True)
+
+    class Meta:
+        verbose_name = _('transaction')
+        verbose_name_plural = _('transactions')
+        unique_together = (('client', 'server'),)
+        ordering = ('client', 'server')
 
     def last_request_ll_mac(self):
         """
@@ -144,7 +169,8 @@ class Client(models.Model):
         if not self.last_request:
             return None
 
-        request_yaml = yaml.dump(json.loads(self.last_request), default_flow_style=False)
+        request_yaml = yaml.dump(json.loads(self.last_request, object_pairs_hook=OrderedDict),
+                                 default_flow_style=False)
         return format_html('<pre style="float: left; margin: 0">{}</pre>', request_yaml)
 
     last_request_html.short_description = _('last request')
@@ -160,9 +186,45 @@ class Client(models.Model):
         if not self.last_response:
             return None
 
-        response_yaml = yaml.dump(json.loads(self.last_response), default_flow_style=False)
+        response_yaml = yaml.dump(json.loads(self.last_response, object_pairs_hook=OrderedDict),
+                                  default_flow_style=False)
         return format_html('<pre style="float: left; margin: 0">{}</pre>', response_yaml)
 
     last_response_html.short_description = _('last response')
     last_response_html.allow_tags = True
     last_response_html = property(last_response_html)
+
+    def client_duid(self):
+        return self.client.duid
+
+    client_duid.short_description = _('DUID')
+    client_duid = property(client_duid)
+
+    def client_duid_ll(self):
+        return self.client.duid_ll
+
+    client_duid_ll.short_description = _('MAC from DUID')
+    client_duid_ll = property(client_duid_ll)
+
+    def client_duid_ll_org(self):
+        return self.client.duid_ll_org
+
+    client_duid_ll_org.short_description = _('MAC vendor')
+    client_duid_ll_org = property(client_duid_ll_org)
+
+    def client_interface_id(self):
+        return self.client.interface_id
+
+    client_interface_id.short_description = _('Interface ID')
+    client_interface_id = property(client_interface_id)
+
+    def client_remote_id(self):
+        return self.client.remote_id
+
+    client_remote_id.short_description = _('Remote ID')
+    client_remote_id = property(client_remote_id)
+
+
+# Proper representation of OrderedDict
+yaml.add_representer(OrderedDict,
+                     lambda self, data: self.represent_mapping('tag:yaml.org,2002:map', data.items()))

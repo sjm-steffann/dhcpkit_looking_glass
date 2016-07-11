@@ -11,7 +11,7 @@ from django.db.models.functions import Concat
 from django.db.models.query_utils import Q
 from django.utils.translation import ugettext_lazy as _
 
-from dhcpkit_looking_glass.models import Client
+from dhcpkit_looking_glass.models import Client, Server, Transaction
 
 
 class ResponseFilter(SimpleListFilter):
@@ -147,36 +147,30 @@ class DuplicateDUIDFilter(SimpleListFilter):
             return queryset
 
 
+@admin.register(Server)
+class ServerAdmin(admin.ModelAdmin):
+    """
+    Admin interface for servers
+    """
+    list_display = ('name',)
+    search_fields = ('name',)
+
+
 @admin.register(Client)
 class ClientAdmin(admin.ModelAdmin):
     """
-    Admin interface for client access
+    Admin interface for clients
     """
-    date_hierarchy = 'last_request_ts'
-    list_filter = (ResponseFilter, MultipleDUIDFilter, DuplicateDUIDFilter, 'last_request_type', 'last_response_type')
-    list_display = ('admin_duid', 'interface_id', 'remote_id',
-                    'last_request_ll', 'last_request_type', 'last_request_ts',
-                    'last_response_type', 'last_response_ts')
-    search_fields = ('interface_id', 'remote_id', 'last_request', 'last_response')
-    ordering = ('remote_id', 'interface_id', 'duid')
+    list_display = ('admin_duid', 'interface_id', 'remote_id')
+    list_filter = (MultipleDUIDFilter, DuplicateDUIDFilter)
+    search_fields = ('interface_id', 'remote_id')
 
-    readonly_fields = ('duid', 'duid_ll', 'duid_ll_org',
-                       'last_request_ll', 'last_request_ll_mac', 'last_request_ll_mac_org',
-                       'interface_id', 'remote_id',
-                       'last_request_html', 'last_request_ts',
-                       'last_response_html', 'last_response_ts')
+    readonly_fields = ('duid', 'duid_ll', 'duid_ll_org', 'interface_id', 'remote_id')
     fieldsets = (
         ('Client', {
             'fields': (('duid', 'duid_ll', 'duid_ll_org'),
-                       ('last_request_ll', 'last_request_ll_mac', 'last_request_ll_mac_org'),
                        'interface_id',
                        'remote_id'),
-        }),
-        ('Request', {
-            'fields': ('last_request_html', 'last_request_ts'),
-        }),
-        ('Response', {
-            'fields': ('last_response_html', 'last_response_ts'),
         }),
     )
 
@@ -192,3 +186,77 @@ class ClientAdmin(admin.ModelAdmin):
 
     admin_duid.short_description = _('DUID / MAC')
     admin_duid.admin_order_field = 'duid'
+
+
+@admin.register(Transaction)
+class TransactionAdmin(admin.ModelAdmin):
+    """
+    Admin interface for transactions
+    """
+    date_hierarchy = 'last_request_ts'
+    list_filter = ('server', ResponseFilter, 'last_request_type', 'last_response_type')
+    list_display = ('admin_duid', 'admin_interface_id', 'admin_remote_id',
+                    'server',
+                    'last_request_ll', 'last_request_type', 'last_request_ts',
+                    'last_response_type', 'last_response_ts')
+    search_fields = ('last_request', 'last_response')
+
+    readonly_fields = ('client_duid', 'client_duid_ll', 'client_duid_ll_org',
+                       'last_request_ll', 'last_request_ll_mac', 'last_request_ll_mac_org',
+                       'client_interface_id',
+                       'client_remote_id',
+                       'last_request_html', 'last_request_ts',
+                       'last_response_html', 'last_response_ts')
+    fieldsets = (
+        ('Client', {
+            'fields': (('client_duid', 'client_duid_ll', 'client_duid_ll_org'),
+                       ('last_request_ll', 'last_request_ll_mac', 'last_request_ll_mac_org'),
+                       'client_interface_id',
+                       'client_remote_id'),
+        }),
+        ('Request', {
+            'fields': ('last_request_html', 'last_request_ts'),
+        }),
+        ('Response', {
+            'fields': ('last_response_html', 'last_response_ts'),
+        }),
+    )
+
+    # noinspection PyMethodMayBeStatic
+    def admin_duid(self, transaction):
+        """
+        Show the DUID as MAC address if possible
+
+        :param transaction: The transaction object
+        :return: The MAC address embedded in the DUID, otherwise the DUID itself
+        """
+        return transaction.client.duid_ll or transaction.client.duid
+
+    admin_duid.short_description = _('DUID / MAC')
+    admin_duid.admin_order_field = 'client.duid'
+
+    # noinspection PyMethodMayBeStatic
+    def admin_interface_id(self, transaction):
+        """
+        Show the Interface ID of the client
+
+        :param transaction: The transaction object
+        :return: The Interface ID
+        """
+        return transaction.client.interface_id
+
+    admin_interface_id.short_description = _('Interface ID')
+    admin_interface_id.admin_order_field = 'client.interface_id'
+
+    # noinspection PyMethodMayBeStatic
+    def admin_remote_id(self, transaction):
+        """
+        Show the Remote ID of the client
+
+        :param transaction: The transaction object
+        :return: The Remote ID
+        """
+        return transaction.client.remote_id
+
+    admin_remote_id.short_description = _('Remote ID')
+    admin_remote_id.admin_order_field = 'client.remote_id'

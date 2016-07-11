@@ -56,14 +56,11 @@ setup(
     packages=find_packages(exclude=['tests', 'tests.*']),
     include_package_data=True,
     entry_points={
-        'dhcpkit.ipv6.option_handlers': [
-            'looking-glass = dhcpkit_looking_glass.dhcpkit.option_handler:LookingGlassOptionHandler',
-        ],
     },
 
     install_requires=[
         'django >= 1.8',
-        'dhcpkit >= 0.8.2',
+        'dhcpkit_kafka >= 0.9.0',
         'netaddr',
         'pyyaml',
         'pytz',

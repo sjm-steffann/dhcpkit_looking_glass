@@ -1,3 +1,0 @@
-"""
-DHCPKit plugin components
-"""
