@@ -1,17 +1,17 @@
 """
 Represent the database that the option handler creates
 """
-import json
 from collections import OrderedDict
 from ipaddress import IPv6Address
 
 import yaml
 from dhcpkit.ipv6.duids import DUID
 from django.db import models
-from django.utils.html import format_html
 from django.utils.translation import ugettext_lazy as _
 from netaddr.eui import EUI
 from netaddr.strategy.eui48 import mac_unix_expanded
+
+from dhcpkit_looking_glass.utils import json_message_to_html
 
 
 class Server(models.Model):
@@ -97,37 +97,45 @@ class Client(models.Model):
 
 
 class Transaction(models.Model):
+    """
+    Log a transaction between a client and a server
+    """
     server = models.ForeignKey(Server)
     client = models.ForeignKey(Client)
 
-    last_request_type = models.CharField(_('last request type'), max_length=50, blank=True, null=True)
-    last_request = models.TextField(_('last request'), blank=True, null=True)
-    last_request_ll = models.GenericIPAddressField(_('Link-local address'), protocol='ipv6', blank=True, null=True)
-    last_request_ts = models.DateTimeField(_('last request timestamp'), blank=True, null=True)
+    request_type = models.CharField(_('request type'), max_length=50, blank=True, null=True)
+    request = models.TextField(_('request'), blank=True, null=True)
+    request_ll = models.GenericIPAddressField(_('Link-local address'), protocol='ipv6', blank=True, null=True)
+    request_ts = models.DateTimeField(_('request timestamp'), blank=True, null=True)
 
-    last_response_type = models.CharField(_('last response type'), max_length=50, blank=True, null=True)
-    last_response = models.TextField(_('last response'), blank=True, null=True)
-    last_response_ts = models.DateTimeField(_('last response timestamp'), blank=True, null=True)
+    response_type = models.CharField(_('response type'), max_length=50, blank=True, null=True)
+    response = models.TextField(_('response'), blank=True, null=True)
+    response_ts = models.DateTimeField(_('response timestamp'), blank=True, null=True)
 
     class Meta:
         verbose_name = _('transaction')
         verbose_name_plural = _('transactions')
-        unique_together = (('client', 'server'),)
-        ordering = ('client', 'server')
+        unique_together = (('client', 'server', 'request_ts'),)
+        ordering = ('-request_ts',)
 
-    def last_request_ll_mac(self):
+    def __str__(self):
+        return "{client} -> {server} @ {ts:%Y-%m-%d %H:%H:%S.%f}".format(client=self.client,
+                                                                         server=self.server,
+                                                                         ts=self.request_ts)
+
+    def request_ll_mac(self):
         """
         Try to get the MAC address based on the link-local address, if possible
 
         :return: MAC address or None
         """
 
-        if not self.last_request_ll:
+        if not self.request_ll:
             return None
 
         # noinspection PyBroadException
         try:
-            addr = IPv6Address(self.last_request_ll)
+            addr = IPv6Address(self.request_ll)
             int_id = bytearray(addr.packed[8:])
             if int_id[3:5] == b'\xff\xfe':
                 # Extract bytes and flip the right bit
@@ -140,85 +148,90 @@ class Transaction(models.Model):
 
         return None
 
-    last_request_ll_mac.short_description = _('Embedded MAC')
-    last_request_ll_mac = property(last_request_ll_mac)
+    request_ll_mac.short_description = _('Embedded MAC')
+    request_ll_mac = property(request_ll_mac)
 
-    def last_request_ll_mac_org(self):
+    def request_ll_mac_org(self):
         """
         Get the vendor from the link-layer address in the DUID, if available
 
         :return: Vendor name or None
         """
-        last_request_ll_mac = self.last_request_ll_mac
-        if last_request_ll_mac:
-            reg = last_request_ll_mac.oui.registration()
+        request_ll_mac = self.request_ll_mac
+        if request_ll_mac:
+            reg = request_ll_mac.oui.registration()
             if reg:
                 return reg['org']
 
         return None
 
-    last_request_ll_mac_org.short_description = 'MAC vendor'
-    last_request_ll_mac_org = property(last_request_ll_mac_org)
+    request_ll_mac_org.short_description = 'MAC vendor'
+    request_ll_mac_org = property(request_ll_mac_org)
 
-    def last_request_html(self):
+    def request_html(self):
         """
-        Return the JSON of the last request in a nice human readable format
+        Return the JSON of the request in a nice human readable format
 
         :return: HTML or None
         """
-        if not self.last_request:
-            return None
+        return json_message_to_html(self.request)
 
-        request_yaml = yaml.dump(json.loads(self.last_request, object_pairs_hook=OrderedDict),
-                                 default_flow_style=False)
-        return format_html('<pre style="float: left; margin: 0">{}</pre>', request_yaml)
+    request_html.short_description = _('request')
+    request_html.allow_tags = True
+    request_html = property(request_html)
 
-    last_request_html.short_description = _('last request')
-    last_request_html.allow_tags = True
-    last_request_html = property(last_request_html)
-
-    def last_response_html(self):
+    def response_html(self):
         """
-        Return the JSON of the last response in a nice human readable format
+        Return the JSON of the response in a nice human readable format
 
         :return: HTML or None
         """
-        if not self.last_response:
-            return None
+        return json_message_to_html(self.response)
 
-        response_yaml = yaml.dump(json.loads(self.last_response, object_pairs_hook=OrderedDict),
-                                  default_flow_style=False)
-        return format_html('<pre style="float: left; margin: 0">{}</pre>', response_yaml)
-
-    last_response_html.short_description = _('last response')
-    last_response_html.allow_tags = True
-    last_response_html = property(last_response_html)
+    response_html.short_description = _('response')
+    response_html.allow_tags = True
+    response_html = property(response_html)
 
     def client_duid(self):
+        """
+        The DUID of the client
+        """
         return self.client.duid
 
     client_duid.short_description = _('DUID')
     client_duid = property(client_duid)
 
     def client_duid_ll(self):
+        """
+        The DUID Link Local address of the client
+        """
         return self.client.duid_ll
 
     client_duid_ll.short_description = _('MAC from DUID')
     client_duid_ll = property(client_duid_ll)
 
     def client_duid_ll_org(self):
+        """
+        The DUID Link Local address organisation of the client
+        """
         return self.client.duid_ll_org
 
     client_duid_ll_org.short_description = _('MAC vendor')
     client_duid_ll_org = property(client_duid_ll_org)
 
     def client_interface_id(self):
+        """
+        The interface-id of the client
+        """
         return self.client.interface_id
 
     client_interface_id.short_description = _('Interface ID')
     client_interface_id = property(client_interface_id)
 
     def client_remote_id(self):
+        """
+        The remote-id of the client
+        """
         return self.client.remote_id
 
     client_remote_id.short_description = _('Remote ID')

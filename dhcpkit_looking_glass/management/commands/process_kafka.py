@@ -2,12 +2,14 @@
 Process to read Kafka messages and save a summary to the database
 """
 import codecs
+import datetime
 import json
 import logging
 import re
 import signal
 import socket
-from datetime import datetime
+import time
+from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
 
 import pykafka
 import pytz
@@ -22,6 +24,7 @@ from django.core.management.base import BaseCommand
 from pykafka.exceptions import ConsumerStoppedException
 from typing import Dict
 
+from dhcpkit_looking_glass import app_settings
 from dhcpkit_looking_glass.models import Client, Server, Transaction
 
 logger = logging.getLogger()
@@ -29,10 +32,11 @@ logger = logging.getLogger()
 
 def _format_host_port(host: str, port: int) -> str:
     """
+    Utility function to create a nice host+port string with proper IPv6 escaping.
 
-    :param host:
-    :param port:
-    :return:
+    :param host: The hostname or IP address string
+    :param port: The port number
+    :return: The formatted host+port
     """
     if not host:
         # Default hostname
@@ -79,7 +83,7 @@ class Command(BaseCommand):
     """
     help = 'Process Kafka messages for the looking glass'
 
-    def add_arguments(self, parser):
+    def add_arguments(self, parser: ArgumentParser):
         """
         Set up command line arguments
 
@@ -87,7 +91,7 @@ class Command(BaseCommand):
         """
         parser.add_argument('-b', '--brokers', nargs='+', metavar='HOST:PORT', default=['localhost:9092'],
                             help='The Kafka brokers to bootstrap from')
-        parser.add_argument('-s', '--source-address', default='',
+        parser.add_argument('-s', '--source-address',
                             help='Source address to use when connecting to Kafka')
         parser.add_argument('-t', '--topic', default='dhcpkit.messages',
                             help='The topic to subscribe to')
@@ -95,6 +99,8 @@ class Command(BaseCommand):
                             help='The consumer group we belong to, for progress tracking')
         parser.add_argument('--from-beginning', action='store_true',
                             help='Start processing messages from the beginning instead of continuing')
+
+        parser.formatter_class = ArgumentDefaultsHelpFormatter
 
     def handle(self, *args, **options):
         """
@@ -109,38 +115,40 @@ class Command(BaseCommand):
         signal.signal(signal.SIGINT, signal_stop)
         signal.signal(signal.SIGTERM, signal_stop)
 
-        try:
-            # noinspection PyTypeChecker
-            kafka = pykafka.KafkaClient(hosts=','.join(map(_fix_broker, options['brokers'])),
-                                        source_address=options['source_address'])
+        while not stopping:
+            try:
+                # noinspection PyTypeChecker
+                kafka = pykafka.KafkaClient(hosts=','.join(map(_fix_broker, options['brokers'])),
+                                            source_address=options['source_address'] or '')
 
-            kafka_topic = kafka.topics[options['topic'].encode('ascii')]
+                kafka_topic = kafka.topics[options['topic'].encode('ascii')]
 
-            kafka_consumer = kafka_topic.get_balanced_consumer(
-                consumer_group=options['consumer_group'].encode('ascii'),
-                auto_commit_enable=True,
-                reset_offset_on_start=options['from_beginning'],
-                consumer_timeout_ms=1000
-            )
+                kafka_consumer = kafka_topic.get_balanced_consumer(
+                    consumer_group=options['consumer_group'].encode('ascii'),
+                    auto_commit_enable=True,
+                    reset_offset_on_start=options['from_beginning'],
+                    consumer_timeout_ms=1000
+                )
 
-            while not stopping:
-                for incoming_message in kafka_consumer:
-                    try:
-                        length, message = KafkaMessage.parse(incoming_message.value)
-                        if not isinstance(message, DHCPKafkaMessage):
-                            # We aren't interested in this message
-                            continue
+                while not stopping:
+                    for incoming_message in kafka_consumer:
+                        try:
+                            length, message = KafkaMessage.parse(incoming_message.value)
+                            if not isinstance(message, DHCPKafkaMessage):
+                                # We aren't interested in this message
+                                continue
 
-                        self.process_message(message)
-                    except Exception as e:
-                        logger.error("Received invalid message from Kafka: {}".format(e))
+                            self.process_message(message)
+                        except Exception as e:
+                            logger.error("Received invalid message from Kafka: {}".format(e))
 
-        except ConsumerStoppedException:
-            return
+            except ConsumerStoppedException:
+                return
 
-        except Exception as e:
-            logger.critical(str(e))
-            return
+            except Exception as e:
+                logger.critical(str(e))
+                time.sleep(5)
+                logger.info("Restarting")
 
     @staticmethod
     def get_transaction_info(message: DHCPKafkaMessage) -> Dict[str, object]:
@@ -206,6 +214,11 @@ class Command(BaseCommand):
         }
 
     def process_message(self, message: DHCPKafkaMessage):
+        """
+        Process a single KafkaMessage
+
+        :param message: The message
+        """
         # Do we have an incoming message?
         if not message.message_in:
             return
@@ -215,27 +228,52 @@ class Command(BaseCommand):
 
         # Get the server and client
         server, created = Server.objects.get_or_create(name=message.server_name)
+        if created:
+            logger.info("Discovered new server: {}".format(server))
+
         client, created = Client.objects.get_or_create(duid=info['duid'],
                                                        interface_id=info['interface_id'],
                                                        remote_id=info['remote_id'])
+        if created:
+            logger.info("Discovered new client: {}".format(client))
 
-        last_response = json.dumps(message.message_out, cls=JSONProtocolElementEncoder) if message.message_out else None
+        # Save the response
+        logger.info("Saving DHCP transaction from {} to {}".format(client, server))
 
-        # Create/Update the transaction
-        if last_response:
-            # Save the response
-            logger.info("Updating response for {} -> {}".format(client, server))
-            Transaction.objects.update_or_create(client=client, server=server, defaults={
-                'last_response_type': info['response_type'],
-                'last_response': last_response,
-                'last_response_ts': datetime.utcfromtimestamp(message.timestamp).replace(tzinfo=pytz.utc),
-            })
-        else:
-            # Save the request
-            logger.info("Updating request for {} -> {}".format(client, server))
-            Transaction.objects.update_or_create(client=client, server=server, defaults={
-                'last_request_type': info['request_type'],
-                'last_request': json.dumps(message.message_in, cls=JSONProtocolElementEncoder),
-                'last_request_ll': info['link_local'],
-                'last_request_ts': datetime.utcfromtimestamp(message.timestamp).replace(tzinfo=pytz.utc),
-            })
+        request_ts = datetime.datetime.utcfromtimestamp(message.timestamp_in).replace(tzinfo=pytz.utc)
+        request = (json.dumps(message.message_in, cls=JSONProtocolElementEncoder)
+                   if message.message_in else '')
+
+        response_ts = datetime.datetime.utcfromtimestamp(message.timestamp_out).replace(tzinfo=pytz.utc)
+        response = (json.dumps(message.message_out, cls=JSONProtocolElementEncoder)
+                    if message.message_out else '')
+
+        Transaction.objects.update_or_create(client=client,
+                                             server=server,
+                                             request_ts=request_ts,
+                                             defaults={
+                                                 'request_type': info['request_type'],
+                                                 'request': request,
+                                                 'request_ll': info['link_local'],
+
+                                                 'response_type': info['response_type'],
+                                                 'response_ts': response_ts,
+                                                 'response': response,
+                                             })
+
+        # Only keep the last transactions per client/server
+        if app_settings.MAX_TRANSACTIONS or app_settings.MAX_TRANSACTION_AGE:
+            my_transactions = Transaction.objects.filter(client=client, server=server)
+            keep = my_transactions
+
+            if app_settings.MAX_TRANSACTION_AGE:
+                deadline = request_ts - app_settings.MAX_TRANSACTION_AGE
+                keep = keep.filter(request_ts__gte=deadline)
+
+            if app_settings.MAX_TRANSACTIONS:
+                keep = keep.order_by('-request_ts')[:app_settings.MAX_TRANSACTIONS]
+
+            delete = my_transactions.exclude(pk__in=keep)
+            deleted, per_model = delete.delete()
+            if deleted:
+                logger.debug("Deleted {} old transactions".format(deleted))

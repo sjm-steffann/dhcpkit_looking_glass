@@ -1,150 +1,18 @@
 """
 Admin settings for the dhcpkit looking glass
 """
-from datetime import timedelta
 
 from django.contrib import admin
-from django.contrib.admin.filters import SimpleListFilter
+from django.core.urlresolvers import reverse
 from django.db.models.aggregates import Count
-from django.db.models.expressions import F, Value
-from django.db.models.functions import Concat
-from django.db.models.query_utils import Q
-from django.utils.translation import ugettext_lazy as _
+from django.db.models.query import QuerySet
+from django.http.request import HttpRequest
+from django.utils import timezone
+from django.utils.html import format_html
+from django.utils.translation import ugettext_lazy as _, ungettext
 
+from dhcpkit_looking_glass.filters import MultipleDUIDFilter, DuplicateDUIDFilter, ResponseFilter
 from dhcpkit_looking_glass.models import Client, Server, Transaction
-
-
-class ResponseFilter(SimpleListFilter):
-    """
-    Filter on response statistics
-    """
-    title = _('Response statistics')
-    parameter_name = 'response_stat'
-
-    def lookups(self, request, model_admin):
-        """
-        Which filters do we provide?
-
-        :param request: The incoming request
-        :param model_admin:
-        :return: A list of lookups
-        """
-        return (('slow', _('Slow responses (>1s)')),
-                ('no', _('No response to last request')))
-
-    def queryset(self, request, queryset):
-        """
-        Adjust the queryset based on the selection
-
-        :param request: The incoming request
-        :type request: django.http.request.HttpRequest
-        :param queryset: The original queryset
-        :type queryset: django.db.models.query.QuerySet
-        :return: The modified queryset
-        :rtype: django.db.models.query.QuerySet
-        """
-        val = self.value()
-        if val == 'slow':
-            return queryset.filter(last_response_ts__gt=F('last_request_ts') + timedelta(seconds=1))
-        elif val == 'no':
-            return queryset.filter(Q(last_response_ts__lt=F('last_request_ts')) | Q(last_response_ts=None))
-        else:
-            return queryset
-
-
-class MultipleDUIDFilter(SimpleListFilter):
-    """
-    Filter on multiple DUIDs per remote-id/interface-id
-    """
-    title = _('Multiple DUIDs')
-    parameter_name = 'multi_duid'
-
-    def lookups(self, request, model_admin):
-        """
-        Which filters do we provide?
-
-        :param request: The incoming request
-        :param model_admin:
-        :return: A list of lookups
-        """
-        return (('per_interface_id', _('per Interface-ID')),
-                ('per_remote_id', _('per Remote-ID')),
-                ('per_combi', _('per combination of both')))
-
-    def queryset(self, request, queryset):
-        """
-        Adjust the queryset based on the selection
-
-        :param request: The incoming request
-        :type request: django.http.request.HttpRequest
-        :param queryset: The original queryset
-        :type queryset: django.db.models.query.QuerySet
-        :return: The modified queryset
-        :rtype: django.db.models.query.QuerySet
-        """
-        val = self.value()
-        if val == 'per_interface_id':
-            return queryset \
-                .filter(interface_id__in=Client.objects.values('interface_id')
-                        .annotate(duid_count=Count('duid'))
-                        .filter(duid_count__gt=1)
-                        .values('interface_id'))
-        elif val == 'per_remote_id':
-            return queryset \
-                .filter(remote_id__in=Client.objects.values('remote_id')
-                        .annotate(duid_count=Count('duid'))
-                        .filter(duid_count__gt=1)
-                        .values('remote_id'))
-        elif val == 'per_combi':
-            return queryset \
-                .annotate(concat_id=Concat('remote_id', Value('|'), 'interface_id')) \
-                .filter(concat_id__in=Client.objects.values('interface_id', 'remote_id')
-                        .annotate(duid_count=Count('duid'))
-                        .filter(duid_count__gt=1)
-                        .annotate(concat_id=Concat('remote_id', Value('|'), 'interface_id'))
-                        .values('concat_id'))
-        else:
-            return queryset
-
-
-class DuplicateDUIDFilter(SimpleListFilter):
-    """
-    Filter on multiple DUIDs per remote-id/interface-id
-    """
-    title = _('Duplicate DUIDs')
-    parameter_name = 'duplicate_duid'
-
-    def lookups(self, request, model_admin):
-        """
-        Which filters do we provide?
-
-        :param request: The incoming request
-        :param model_admin:
-        :return: A list of lookups
-        """
-        return (('yes', _('DUID on different ports')),
-                )
-
-    def queryset(self, request, queryset):
-        """
-        Adjust the queryset based on the selection
-
-        :param request: The incoming request
-        :type request: django.http.request.HttpRequest
-        :param queryset: The original queryset
-        :type queryset: django.db.models.query.QuerySet
-        :return: The modified queryset
-        :rtype: django.db.models.query.QuerySet
-        """
-        val = self.value()
-        if val == 'yes':
-            return queryset \
-                .filter(duid__in=Client.objects.values('duid')
-                        .annotate(port_count=Count('interface_id', 'remote_id'))
-                        .filter(port_count__gt=1)
-                        .values('duid'))
-        else:
-            return queryset
 
 
 @admin.register(Server)
@@ -161,7 +29,7 @@ class ClientAdmin(admin.ModelAdmin):
     """
     Admin interface for clients
     """
-    list_display = ('admin_duid', 'interface_id', 'remote_id')
+    list_display = ('admin_duid', 'interface_id', 'remote_id', 'admin_transactions_link')
     list_filter = (MultipleDUIDFilter, DuplicateDUIDFilter)
     search_fields = ('interface_id', 'remote_id')
 
@@ -174,8 +42,36 @@ class ClientAdmin(admin.ModelAdmin):
         }),
     )
 
+    def get_queryset(self, request: HttpRequest) -> QuerySet:
+        """
+        Get the transaction counts in one go
+
+        :param request: The incoming request
+        :return: The queryset with clients
+        """
+        qs = super().get_queryset(request)
+        return qs.annotate(num_transactions=Count('transaction'))
+
     # noinspection PyMethodMayBeStatic
-    def admin_duid(self, client):
+    def admin_transactions_link(self, client: Client) -> str:
+        """
+        Show a link to the transactions for this client
+
+        :param client: The client object
+        :return: The HTML link
+        """
+        return format_html('<a href="{url}?client={client_id}">{label}</a>',
+                           client_id=client.id,
+                           url=reverse("admin:dhcpkit_looking_glass_transaction_changelist"),
+                           label=ungettext(
+                               "{count} transaction",
+                               "{count} transactions",
+                               client.num_transactions).format(count=client.num_transactions))
+
+    admin_transactions_link.short_description = _("Transactions")
+
+    # noinspection PyMethodMayBeStatic
+    def admin_duid(self, client: Client) -> str:
         """
         Show the DUID as MAC address if possible
 
@@ -193,37 +89,62 @@ class TransactionAdmin(admin.ModelAdmin):
     """
     Admin interface for transactions
     """
-    date_hierarchy = 'last_request_ts'
-    list_filter = ('server', ResponseFilter, 'last_request_type', 'last_response_type')
+    date_hierarchy = 'request_ts'
+    list_filter = ('server', ResponseFilter, 'request_type', 'response_type')
     list_display = ('admin_duid', 'admin_interface_id', 'admin_remote_id',
-                    'server',
-                    'last_request_ll', 'last_request_type', 'last_request_ts',
-                    'last_response_type', 'last_response_ts')
-    search_fields = ('last_request', 'last_response')
+                    'server', 'admin_request_ts_ms',
+                    'request_ll', 'request_type', 'response_type')
+    search_fields = ('client__duid', 'client__interface_id', 'client__remote_id', 'request', 'response')
 
     readonly_fields = ('client_duid', 'client_duid_ll', 'client_duid_ll_org',
-                       'last_request_ll', 'last_request_ll_mac', 'last_request_ll_mac_org',
+                       'request_ll', 'request_ll_mac', 'request_ll_mac_org',
                        'client_interface_id',
                        'client_remote_id',
-                       'last_request_html', 'last_request_ts',
-                       'last_response_html', 'last_response_ts')
+                       'request_html', 'admin_request_ts_ms',
+                       'response_html', 'admin_response_ts_ms')
     fieldsets = (
         ('Client', {
             'fields': (('client_duid', 'client_duid_ll', 'client_duid_ll_org'),
-                       ('last_request_ll', 'last_request_ll_mac', 'last_request_ll_mac_org'),
+                       ('request_ll', 'request_ll_mac', 'request_ll_mac_org'),
                        'client_interface_id',
                        'client_remote_id'),
         }),
         ('Request', {
-            'fields': ('last_request_html', 'last_request_ts'),
+            'fields': ('request_html', 'admin_request_ts_ms'),
         }),
         ('Response', {
-            'fields': ('last_response_html', 'last_response_ts'),
+            'fields': ('response_html', 'admin_response_ts_ms'),
         }),
     )
 
     # noinspection PyMethodMayBeStatic
-    def admin_duid(self, transaction):
+    def admin_request_ts_ms(self, transaction: Transaction) -> str:
+        """
+        Show the last request timestamp with milliseconds
+
+        :param transaction: The transaction
+        :return: The timestamp as a string
+        """
+        return "{:%Y-%m-%d %H:%M:%S.%f}".format(timezone.localtime(transaction.request_ts))
+
+    admin_request_ts_ms.short_description = _('last request')
+    admin_request_ts_ms.admin_order_field = 'request_ts'
+
+    # noinspection PyMethodMayBeStatic
+    def admin_response_ts_ms(self, transaction: Transaction) -> str:
+        """
+        Show the last response timestamp with milliseconds
+
+        :param transaction: The transaction
+        :return: The timestamp as a string
+        """
+        return "{:%Y-%m-%d %H:%M:%S.%f}".format(timezone.localtime(transaction.response_ts))
+
+    admin_response_ts_ms.short_description = _('last request')
+    admin_response_ts_ms.admin_order_field = 'response_ts'
+
+    # noinspection PyMethodMayBeStatic
+    def admin_duid(self, transaction: Transaction) -> str:
         """
         Show the DUID as MAC address if possible
 
@@ -236,7 +157,7 @@ class TransactionAdmin(admin.ModelAdmin):
     admin_duid.admin_order_field = 'client.duid'
 
     # noinspection PyMethodMayBeStatic
-    def admin_interface_id(self, transaction):
+    def admin_interface_id(self, transaction: Transaction) -> str:
         """
         Show the Interface ID of the client
 
@@ -249,7 +170,7 @@ class TransactionAdmin(admin.ModelAdmin):
     admin_interface_id.admin_order_field = 'client.interface_id'
 
     # noinspection PyMethodMayBeStatic
-    def admin_remote_id(self, transaction):
+    def admin_remote_id(self, transaction: Transaction) -> str:
         """
         Show the Remote ID of the client
 
