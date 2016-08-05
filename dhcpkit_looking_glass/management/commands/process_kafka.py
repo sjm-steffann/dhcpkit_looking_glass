@@ -20,12 +20,12 @@ from dhcpkit.ipv6.options import ClientIdOption, InterfaceIdOption
 from dhcpkit.ipv6.utils import split_relay_chain
 from dhcpkit.protocol_element import JSONProtocolElementEncoder
 from dhcpkit_kafka.messages import KafkaMessage, DHCPKafkaMessage
-from django.core.management.base import BaseCommand
-from pykafka.exceptions import ConsumerStoppedException
-from typing import Dict
-
 from dhcpkit_looking_glass import app_settings
 from dhcpkit_looking_glass.models import Client, Server, Transaction
+from django.core.management.base import BaseCommand
+from pykafka.common import OffsetType
+from pykafka.exceptions import ConsumerStoppedException
+from typing import Dict
 
 logger = logging.getLogger()
 
@@ -99,6 +99,8 @@ class Command(BaseCommand):
                             help='The consumer group we belong to, for progress tracking')
         parser.add_argument('--from-beginning', action='store_true',
                             help='Start processing messages from the beginning instead of continuing')
+        parser.add_argument('--skip-backlog', action='store_true',
+                            help='Ignore old messages instead of continuing where we left off')
 
         parser.formatter_class = ArgumentDefaultsHelpFormatter
 
@@ -126,7 +128,8 @@ class Command(BaseCommand):
                 kafka_consumer = kafka_topic.get_balanced_consumer(
                     consumer_group=options['consumer_group'].encode('ascii'),
                     auto_commit_enable=True,
-                    reset_offset_on_start=options['from_beginning'],
+                    auto_offset_reset=OffsetType.LATEST if options['skip_backlog'] else OffsetType.EARLIEST,
+                    reset_offset_on_start=options['from_beginning'] or options['skip_backlog'],
                     consumer_timeout_ms=1000
                 )
 
