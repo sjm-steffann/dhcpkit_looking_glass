@@ -2,6 +2,8 @@
 Admin settings for the dhcpkit looking glass
 """
 
+from dhcpkit_looking_glass.filters import MultipleDUIDFilter, DuplicateDUIDFilter, ResponseFilter
+from dhcpkit_looking_glass.models import Client, Server, Transaction
 from django.contrib import admin
 from django.core.urlresolvers import reverse
 from django.db.models.aggregates import Count
@@ -10,9 +12,6 @@ from django.http.request import HttpRequest
 from django.utils import timezone
 from django.utils.html import format_html
 from django.utils.translation import ugettext_lazy as _, ungettext
-
-from dhcpkit_looking_glass.filters import MultipleDUIDFilter, DuplicateDUIDFilter, ResponseFilter
-from dhcpkit_looking_glass.models import Client, Server, Transaction
 
 
 @admin.register(Server)
@@ -154,7 +153,7 @@ class TransactionAdmin(admin.ModelAdmin):
         return transaction.client.duid_ll or transaction.client.duid
 
     admin_duid.short_description = _('DUID / MAC')
-    admin_duid.admin_order_field = 'client.duid'
+    admin_duid.admin_order_field = 'client__duid'
 
     # noinspection PyMethodMayBeStatic
     def admin_interface_id(self, transaction: Transaction) -> str:
