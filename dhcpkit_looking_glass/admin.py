@@ -166,7 +166,7 @@ class TransactionAdmin(admin.ModelAdmin):
         return transaction.client.interface_id
 
     admin_interface_id.short_description = _('Interface ID')
-    admin_interface_id.admin_order_field = 'client.interface_id'
+    admin_interface_id.admin_order_field = 'client__interface_id'
 
     # noinspection PyMethodMayBeStatic
     def admin_remote_id(self, transaction: Transaction) -> str:
@@ -179,4 +179,4 @@ class TransactionAdmin(admin.ModelAdmin):
         return transaction.client.remote_id
 
     admin_remote_id.short_description = _('Remote ID')
-    admin_remote_id.admin_order_field = 'client.remote_id'
+    admin_remote_id.admin_order_field = 'client__remote_id'
