@@ -19,6 +19,3 @@ Distribution status
 
 .. image:: https://img.shields.io/pypi/pyversions/dhcpkit_looking_glass.svg
   :target: https://pypi.python.org/pypi/dhcpkit_looking_glass
-
-.. image:: https://img.shields.io/pypi/dw/dhcpkit_looking_glass.svg
-  :target: https://pypi.python.org/pypi/dhcpkit_looking_glass
